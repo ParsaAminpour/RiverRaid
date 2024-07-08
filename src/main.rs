@@ -24,7 +24,7 @@ trait GameStructure {
     // comprehensive explanation
     fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self>;
     // comprehensive explanation
-    fn shyft_ground_loc(&mut self, change: bool) -> Result<&mut Self>;
+    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self>;
 }
 
 
@@ -44,6 +44,7 @@ pub struct Game2DMatrix {
     ground: Vec<(u16, u16)>,
     game_staus: GameStatus,
     initialized: bool,
+    logo: String,
 }
 
 
@@ -91,27 +92,26 @@ impl GameStructure for Game2DMatrix {
 
         // draw the player
         screen.queue(MoveTo(self.player_i, self.player_j))?;
-        screen.queue(Print("p"))?;
+        screen.queue(Print(&self.logo))?;
         
         screen.flush()?;            
         Ok(())
     }
 
-    fn shyft_ground_loc(&mut self, change: bool) -> Result<&mut Self> {
+    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self> {
         for i in (1..self.map.row(0).len()).rev() {
             self.ground[i] = self.ground[i - 1];
         }
         
+        let mut rng = rand::thread_rng();
+        let delta = rng.gen_range(1..5);
+
         if change {
-            let mut rng = rand::thread_rng();
-
-            let delta = rng.gen_range(5..self.screen_mid);
-            let h_move = rng.gen_range(0..(self.screen_mid));
-            self.ground[0] = ((self.screen_mid - delta), (self.screen_mid + delta));
+            // self.ground[0] = ((self.screen_mid - delta), (self.screen_mid + delta));
+            self.ground[0] = (self.ground[1].0 + delta, self.ground[1].1 + delta);
             Ok(self)
-
         } else {
-            self.ground[0] = self.ground[1];
+            self.ground[0] = (self.ground[1].0 - delta, self.ground[1].1 - delta);
             Ok(self)
         }
     }
@@ -121,7 +121,9 @@ impl GameStructure for Game2DMatrix {
         let user_j: usize = self.player_j as usize;
 
         // handling the boat accidentation with ground
-        if self.player_i == self.ground[user_j].0 || self.player_i == self.ground[user_j].1 {
+        if self.player_i == self.ground[user_j].0 || self.player_i == self.ground[user_j].1
+            // || (self.player_j == self.ground[user_j].0 || self.player_j == self.ground[user_j].)
+        {
             self.game_staus = GameStatus::DEATH;
         }
 
@@ -152,7 +154,8 @@ fn main() -> Result<()> {
         // ground: vec![((max_i / 2) - 10, (max_i / 2) + 10); max_j as usize],
         ground: vec![(0,0); max_j as usize],
         game_staus: GameStatus::ALIVE,
-        initialized: false
+        initialized: false,
+        logo: '⛵'.to_string(),
     };
 
     nd2array = nd2array.initialize_ground(&mut screen)?;
@@ -201,7 +204,7 @@ fn main() -> Result<()> {
         }
         sleep(Duration::from_millis(100));
         nd2array.draw(&mut screen).unwrap();
-        nd2array = nd2array.shyft_ground_loc(rand::thread_rng().gen_bool(0.05)).unwrap();
+        nd2array = nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.2)).unwrap();
         nd2array = nd2array.reactions().unwrap();
 
         if nd2array.game_staus == GameStatus::DEATH { break; }
