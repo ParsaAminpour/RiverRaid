@@ -1,8 +1,8 @@
-use std::{fs::ReadDir, io::{stdout, Result, Stdout, Write}, thread::sleep};
+use core::time;
+use std::{fs::ReadDir, io::{stdout, Result, Stdout, Write}, pin::Pin, thread::sleep, vec};
 use crossterm::{
-    cursor::{Hide, MoveTo, Show}, event::{self, poll, read, Event, KeyCode}, execute, style::{
-        Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, 
-        terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
+    cursor::{Hide, MoveTo, Show}, event::{self, poll, read, Event, KeyCode}, execute, queue, style::{
+        Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
 use ndarray::{Array2, ArrayBase, Dim, OwnedArcRepr, Array};
 use inline_colorization::*;
@@ -18,7 +18,7 @@ use std::time::Duration;
 */
 trait GameStructure {
     // comprehensive explanation
-    fn draw(&mut self, screen: &mut Stdout, resolve_enemy: bool) -> Result<()>;
+    fn draw(&mut self, screen: &mut Stdout, show_enemy: bool, show_fuel: bool) -> Result<()>;
     // comprehensive explanation
     fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Game2DMatrix>;
     // comprehensive explanation
@@ -46,7 +46,14 @@ struct Enemy {
 #[derive(Debug)]
 struct Bullet {
     location: Location,
-    energy: u16
+    active: bool,
+    logo: String,
+}
+
+#[derive(Debug)]
+struct Fuel {
+    location: Location,
+    logo: String,
 }
 
 #[derive(Debug)]
@@ -60,7 +67,11 @@ pub struct Game2DMatrix {
     ground: Vec<(u16, u16)>,
     enemies: Vec<Enemy>,
     bullets: Vec<Bullet>,
+    fuels: Vec<Fuel>,
     game_staus: GameStatus,
+    score: u32,
+    gas: u32,
+    enemy_killed: u32,
     initialized: bool,
     logo: String,
 }
@@ -96,7 +107,7 @@ impl GameStructure for Game2DMatrix {
     }
 
 
-    fn draw(&mut self, screen: &mut Stdout,  resolve_enemy: bool) -> Result<()> {
+    fn draw(&mut self, screen: &mut Stdout,  show_enemy: bool, show_fuel: bool) -> Result<()> {
         screen.queue(Clear(ClearType::All))?;
 
         // draw the map as first scence
@@ -111,11 +122,27 @@ impl GameStructure for Game2DMatrix {
 
         for bullet in self.bullets.iter() {
             screen.queue(MoveTo(bullet.location.element_j, bullet.location.element_i))?
-                .queue(Print("o"))?;
+                .queue(Print(&bullet.logo))?;
+        }
+
+        // adjust furl in the posibility of 10% of situations.
+        if show_fuel {
+            self.fuels.push( Fuel {
+                location: Location {
+                    element_i: 2,
+                    element_j: rand::thread_rng().gen_range(self.ground[2].0..self.ground[2].1)
+                },
+                logo: '⛽'.to_string()
+            })
+        }
+
+        for fuel in self.fuels.iter() {
+            screen.queue(MoveTo(fuel.location.element_j, fuel.location.element_i))?
+                .queue(Print(&fuel.logo))?;
         }
 
         // adjust enemy in the posibility of 10% of situations
-        if resolve_enemy {
+        if show_enemy {
             self.enemies.push( Enemy {
                 location: Location { 
                     element_i: 2, 
@@ -135,8 +162,16 @@ impl GameStructure for Game2DMatrix {
         // draw the player
         screen.queue(MoveTo(self.player_i, self.player_j))?;
         screen.queue(Print(&self.logo))?;
+
+        // draw the game scores and status
+        screen.queue(MoveTo(5, 5))?
+            .queue(Print(format!("Score: {}", self.score)))?
+            .queue(MoveTo(5, 6))?
+            .queue(Print(format!("Enemy killed: {}", self.enemy_killed)))?
+            .queue(MoveTo(5, 7))?
+            .queue(Print(format!("Fuel: {}", self.gas)))?;
         
-        screen.flush()?;               
+        screen.flush()?;
         Ok(())
     }
 
@@ -159,9 +194,15 @@ impl GameStructure for Game2DMatrix {
             enemy.location.element_i = enemy.location.element_i.saturating_add(1);
         }
         
+        for fuel in self.fuels.iter_mut() {
+            fuel.location.element_i = fuel.location.element_i.saturating_add(1);
+        }
 
         let mut rng = rand::thread_rng();
         let delta = rng.gen_range(1..6);
+
+        self.score += 1;
+        if self.score % 20 == 0 { self.gas -= 1; }
 
         if change && (self.ground[1].1 < self.max_screen_i - 5) {
             self.ground[0] = (self.ground[1].0 + delta, self.ground[1].1 + delta);
@@ -176,16 +217,18 @@ impl GameStructure for Game2DMatrix {
     }
 
 
-
     fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Self> {
         let user_j: usize = self.player_j as usize;
+
+        if self.gas == 0 {
+            self.game_staus = GameStatus::DEATH;
+        }
 
         // handling the boat accidentation with ground
         if self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1
         {
             self.game_staus = GameStatus::DEATH;
         }
-
 
         let mut enemies_to_remove:Vec<usize> = vec![];
 
@@ -195,23 +238,39 @@ impl GameStructure for Game2DMatrix {
             }
 
             for bullet in self.bullets.iter_mut() {
-                if (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
-                    (enemy.location.element_j-3..enemy.location.element_j+3).contains(&bullet.location.element_j)  
+                if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
+                    (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
                 {                
                     enemy.logo = ' '.to_string();
                     enemies_to_remove.push(idx);
+                    sleep(Duration::from_millis(100));
+                    bullet.active = false;
+                    bullet.logo = ' '.to_string();
                 }
             }
         }
         enemies_to_remove.sort_unstable_by(|a, b| b.cmp(a)); // Sort in reverse order
         for idx in enemies_to_remove {
             self.enemies.remove(idx);
+            self.enemy_killed += 1;
         }
-
 
         self.enemies.retain(|enemy| {
             enemy.location.element_i < self.max_screen_j - 3
         });
+
+        // Take reaction to the fuel chars.
+        for fuel in self.fuels.iter() {
+            if (fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
+            (fuel.location.element_i == self.player_j) { self.gas += 10; }
+        }
+        
+        self.fuels.retain(|fuel|
+            !((fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
+                (fuel.location.element_i == self.player_j) ||
+                (fuel.location.element_i > self.max_screen_j - 3)
+            )
+        );
 
         Ok(self)
     }
@@ -240,7 +299,11 @@ fn main() -> Result<()> {
         ground: vec![(0,0); max_j as usize],
         enemies: vec![],
         bullets: vec![],
+        fuels: vec![],
         game_staus: GameStatus::ALIVE,
+        score: 0,
+        gas: 120,
+        enemy_killed: 0,
         initialized: false,
         logo: '⛵'.to_string(),
     };
@@ -274,7 +337,8 @@ fn main() -> Result<()> {
                                     element_i: nd2array.player_j,
                                     element_j: nd2array.player_i,
                                 },
-                                energy: 10
+                                active: true,
+                                logo: '🔥'.to_string()
                             });
                         }
                         _ => {}
@@ -286,7 +350,7 @@ fn main() -> Result<()> {
         sleep(Duration::from_millis(100));
         nd2array = nd2array.reactions().unwrap();
 
-        nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1)).unwrap();
+        nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.05)).unwrap();
 
         nd2array = nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
 
@@ -295,8 +359,8 @@ fn main() -> Result<()> {
 
     screen.flush().unwrap();
     screen.execute(Show)?;
-    screen.queue(MoveTo(nd2array.max_screen_i / 2, 0))?;
-    screen.queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
+    screen.queue(MoveTo(nd2array.max_screen_i / 2, 0))?
+        .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
 
     Ok(())
 }
