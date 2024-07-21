@@ -1,14 +1,14 @@
-use core::time;
-use std::{fs::ReadDir, io::{stdout, Result, Stdout, Write}, pin::Pin, thread::sleep, vec};
+use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
 use crossterm::{
-    cursor::{Hide, MoveTo, Show}, event::{self, poll, read, Event, KeyCode}, execute, queue, style::{
-        Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
+    cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
+        Color, Print, ResetColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
-use ndarray::{Array2, ArrayBase, Dim, OwnedArcRepr, Array};
+use ndarray::{Array2, Array};
 use inline_colorization::*;
 use rand::prelude::*;
-use chrono::prelude::*;
 use std::time::Duration;
+use std::thread;
+use std::sync::{Mutex, Arc};
 
 /*
 ** GAME PHASES
@@ -21,6 +21,9 @@ trait GameStructure {
     fn draw(&mut self, screen: &mut Stdout, show_enemy: bool, show_fuel: bool) -> Result<()>;
     // comprehensive explanation
     fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Game2DMatrix>;
+
+    fn reactions2(&'static mut self, /*screen: &mut Stdout*/) -> Result<&'static mut Game2DMatrix>;
+
     // comprehensive explanation
     fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self>;
     // comprehensive explanation
@@ -217,6 +220,9 @@ impl GameStructure for Game2DMatrix {
     }
 
 
+
+
+
     fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Self> {
         let user_j: usize = self.player_j as usize;
 
@@ -224,19 +230,25 @@ impl GameStructure for Game2DMatrix {
             self.game_staus = GameStatus::DEATH;
         }
 
+
         // handling the boat accidentation with ground
+        // let handle_boat_accident = thread::spawn(move|| {
         if self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1
         {
             self.game_staus = GameStatus::DEATH;
         }
+        // });
 
+        // enemies
         let mut enemies_to_remove:Vec<usize> = vec![];
 
         for (idx, enemy) in self.enemies.iter_mut().enumerate() {
+            // player collision with the enemies in the ground.
             if enemy.location.element_j == self.player_i && enemy.location.element_i == self.player_j {
                 self.game_staus = GameStatus::DEATH;
             }
 
+            // the reaction related to the player's bullets verses the enemies.
             for bullet in self.bullets.iter_mut() {
                 if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
                     (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
@@ -255,16 +267,17 @@ impl GameStructure for Game2DMatrix {
             self.enemy_killed += 1;
         }
 
-        self.enemies.retain(|enemy| {
-            enemy.location.element_i < self.max_screen_j - 3
-        });
-
         // Take reaction to the fuel chars.
         for fuel in self.fuels.iter() {
             if (fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
             (fuel.location.element_i == self.player_j) { self.gas += 10; }
         }
         
+
+        self.enemies.retain(|enemy| {
+            enemy.location.element_i < self.max_screen_j - 3
+        });
+
         self.fuels.retain(|fuel|
             !((fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
                 (fuel.location.element_i == self.player_j) ||
@@ -274,6 +287,65 @@ impl GameStructure for Game2DMatrix {
 
         Ok(self)
     }
+
+
+    // let's using multi-thread in advance.
+    fn reactions2(&'static mut self, /*screen: &mut Stdout*/) -> Result<&'static mut Self> {
+        let user_j: usize = self.player_j as usize;
+
+        // Player gas check and ground collision.
+        if (self.gas == 0) || 
+            (self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1) 
+        {
+            self.game_staus = GameStatus::DEATH;
+        }
+        
+        let game_state: Arc<Mutex<&'static mut Game2DMatrix>> = Arc::new(Mutex::new(self));
+        let game_state_cloned: Arc<Mutex<&mut Game2DMatrix>> = Arc::clone(&game_state);
+
+        // player collision to the ground checks.
+        let handling_enemy_and_player_collision = thread::spawn(move|| {
+            let mut locked_game_state = game_state_cloned.lock().unwrap();
+
+            let mut death: bool = false;
+            for enemy in locked_game_state.enemies.iter() {
+                // let locked_game_state_instance = locked_game_state;
+                if enemy.location.element_j == locked_game_state.player_i && enemy.location.element_i == locked_game_state.player_j {
+                    death = true;
+                }
+            }
+            if death { locked_game_state.game_staus = GameStatus::DEATH; };
+        });
+
+
+        // the reactions related to the enemies.
+        let handling_enemy_and_bullet_collisions = thread::spawn(move || {
+            let mut locked_game_state = game_state.lock().unwrap();
+            for bullet in self.bullets.iter_mut() {
+                if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
+                    (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
+                {                
+                    enemy.logo = ' '.to_string();
+                    enemies_to_remove.push(idx);
+                    sleep(Duration::from_millis(100));
+                    bullet.active = false;
+                    bullet.logo = ' '.to_string();
+                }
+            }
+        });
+        
+        // the reaction related to the fuels.
+
+        // remove the unused ground chracters at the botton of the ground.
+        
+        // handle the unfullfiled threads.
+        
+        handling_enemy_and_player_collision.join().unwrap();
+        Ok(self)
+    }
+
+
+
 }
 
 
@@ -323,9 +395,9 @@ fn main() -> Result<()> {
                     match event.code {
                         KeyCode::Char('q') => { break; },
 
-                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { nd2array.player_i += 1; },
+                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { nd2array.player_i += 2; },
 
-                        KeyCode::Left => if nd2array.player_i - 1 > 0 { nd2array.player_i -= 1; },
+                        KeyCode::Left => if nd2array.player_i - 1 > 0 { nd2array.player_i -= 2; },
 
                         KeyCode::Up => if nd2array.player_j - 1 > 0 { nd2array.player_j -= 1; },
 
@@ -350,7 +422,7 @@ fn main() -> Result<()> {
         sleep(Duration::from_millis(100));
         nd2array = nd2array.reactions().unwrap();
 
-        nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.05)).unwrap();
+        nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
 
         nd2array = nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
 
