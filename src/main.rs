@@ -1,7 +1,7 @@
 use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
-        Color, Colored, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
+        Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
 use ndarray::{Array2, Array};
 use inline_colorization::*;
@@ -16,21 +16,6 @@ use std::time::Duration;
 * physics: performing the physical changes for the boats or the enemies
 * drawing: performing the changes related to the screen.
 */
-trait GameStructure {
-    // comprehensive explanation
-    fn draw(&mut self, screen: &mut Stdout, show_enemy: bool, show_fuel: bool) -> Result<()>;
-    // comprehensive explanation
-    fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Game2DMatrix>;
-
-    // fn reactions2(&'static mut self, /*screen: &mut Stdout*/) -> Result<&'static mut Game2DMatrix>;
-
-    // comprehensive explanation
-    fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self>;
-    // comprehensive explanation
-    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self>;
-}
-
-
 #[derive(Debug, PartialEq, Eq)]
 enum GameStatus {
     ALIVE, DEATH, /*PAUSED, FUEL_ENDED*/
@@ -79,10 +64,36 @@ pub struct Game2DMatrix {
     logo: String,
 }
 
-impl GameStructure for Game2DMatrix {
+impl Game2DMatrix {
+    fn new() -> Game2DMatrix {
+        // initialize the game information
+        let (max_i, max_j) = size().unwrap();
+
+        Game2DMatrix {
+            player_i: max_i / 2,
+            player_j: max_j - 10,
+            max_screen_i: max_i, 
+            max_screen_j: max_j,
+            screen_mid: max_i / 2,
+            map: Array::from_shape_vec(
+                (max_i as usize, max_j as usize), 
+                vec![0.0; (max_i*max_j) as usize]).unwrap(),
+            ground: vec![(0,0); max_j as usize],
+            enemies: Vec::new(),
+            bullets: Vec::new(),
+            fuels: Vec::new(),
+            game_staus: GameStatus::ALIVE,
+            score: 0,
+            gas: 1500,
+            enemy_killed: 0,
+            initialized: false,
+            logo: '⛵'.to_string(),
+        }
+    }
+
     /// @notice this function will use at the beginning of the game to initialize the ground borders.
     /// @dev this function will use in the draw function is self.initialize was false.
-    fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self> {
+    fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<()> {
         // initial phase of screen
         screen.queue(Clear(ClearType::All))?;
 
@@ -106,7 +117,7 @@ impl GameStructure for Game2DMatrix {
         }
 
         self.initialized = true;
-        Ok(self)
+        Ok(())
     }
 
 
@@ -200,7 +211,7 @@ impl GameStructure for Game2DMatrix {
 
     /// @notice this function perform the elements' movement during the game loop i.e. bullets, enemies, etc.
     /// @dev this function will be called after the draw function to get the modified nd2array game information.
-    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self> {
+    fn shift_ground_loc(&mut self, change: bool) -> Result<()> {
         for i in (1..self.map.row(0).len()).rev() {
             self.ground[i] = self.ground[i - 1];
         }
@@ -224,34 +235,27 @@ impl GameStructure for Game2DMatrix {
         let delta = rng.gen_range(1..6);
 
         self.score += 1;
-        if self.score % 20 == 0 { self.gas -= 1; }
+        if self.score % 2 == 0 { self.gas -= 1; }
 
         if change && (self.ground[1].1 < self.max_screen_i - 5) {
             self.ground[0] = (self.ground[1].0 + delta, self.ground[1].1 + delta);
-            Ok(self)
         } else if self.ground[1].0 > delta {
             self.ground[0] = (self.ground[1].0 - delta, self.ground[1].1 - delta);
-            Ok(self)
         } else {
             self.ground[0] = self.ground[1];
-            Ok(self)
         }
+        Ok(())
     }
 
 
-
-
-
-    fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Self> {
+    fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<()> {
         let user_j: usize = self.player_j as usize;
 
         if self.gas == 0 {
             self.game_staus = GameStatus::DEATH;
         }
 
-
         // handling the boat accidentation with ground
-        // let handle_boat_accident = thread::spawn(move|| {
         if self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1
         {
             self.game_staus = GameStatus::DEATH;
@@ -289,7 +293,7 @@ impl GameStructure for Game2DMatrix {
         // Take reaction to the fuel chars.
         for fuel in self.fuels.iter() {
             if (fuel.location.element_j-2..fuel.location.element_j+2).contains(&self.player_i) &&
-            (fuel.location.element_i == self.player_j) { self.gas += 10; }
+            (fuel.location.element_i == self.player_j) { self.gas += 30; }
         }
         
 
@@ -304,7 +308,7 @@ impl GameStructure for Game2DMatrix {
             )
         );
 
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -314,33 +318,9 @@ fn main() -> Result<()> {
     enable_raw_mode().unwrap();
     screen.execute(Hide).unwrap();
 
-    
-    // initialize the game information
-    let (max_i, max_j) = size().unwrap();
+    let mut nd2array = Game2DMatrix::new();
 
-    let mut nd2array = &mut Game2DMatrix {
-        player_i: max_i / 2,
-        player_j: max_j - 10,
-        max_screen_i: max_i, 
-        max_screen_j: max_j,
-        screen_mid: max_i / 2,
-        map: Array::from_shape_vec(
-            (max_i as usize, max_j as usize), 
-            vec![0.0; (max_i*max_j) as usize]).unwrap(),
-        // ground: vec![((max_i / 2) - 10, (max_i / 2) + 10); max_j as usize],
-        ground: vec![(0,0); max_j as usize],
-        enemies: vec![],
-        bullets: vec![],
-        fuels: vec![],
-        game_staus: GameStatus::ALIVE,
-        score: 0,
-        gas: 120,
-        enemy_killed: 0,
-        initialized: false,
-        logo: '⛵'.to_string(),
-    };
-
-    nd2array = nd2array.initialize_ground(&mut screen)?;
+    nd2array.initialize_ground(&mut screen).unwrap();
     
     while nd2array.game_staus == GameStatus::ALIVE {
         // implementing the keyboard binding.
@@ -380,11 +360,11 @@ fn main() -> Result<()> {
             }
         }
         sleep(Duration::from_millis(100));
-        nd2array = nd2array.reactions().unwrap();
+        nd2array.reactions().unwrap();
 
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
 
-        nd2array = nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
+        nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
 
         if nd2array.game_staus == GameStatus::DEATH { break; }
     }
