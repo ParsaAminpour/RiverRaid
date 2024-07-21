@@ -1,14 +1,14 @@
 use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
-        Color, Print, ResetColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
+        Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
 use ndarray::{Array2, Array};
 use inline_colorization::*;
 use rand::prelude::*;
 use std::time::Duration;
-use std::thread;
-use std::sync::{Mutex, Arc};
+// use std::thread;
+// use std::sync::{Mutex, Arc};
 
 /*
 ** GAME PHASES
@@ -16,73 +16,84 @@ use std::sync::{Mutex, Arc};
 * physics: performing the physical changes for the boats or the enemies
 * drawing: performing the changes related to the screen.
 */
-trait GameStructure {
-    // comprehensive explanation
-    fn draw(&mut self, screen: &mut Stdout, show_enemy: bool, show_fuel: bool) -> Result<()>;
-    // comprehensive explanation
-    fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Game2DMatrix>;
-
-    // fn reactions2(&'static mut self, /*screen: &mut Stdout*/) -> Result<&'static mut Game2DMatrix>;
-
-    // comprehensive explanation
-    fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self>;
-    // comprehensive explanation
-    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self>;
-}
-
-
 #[derive(Debug, PartialEq, Eq)]
-enum GameStatus {
+pub enum GameStatus {
     ALIVE, DEATH, /*PAUSED, FUEL_ENDED*/
 }
 
 #[derive(Debug)]
-struct Location {
-    element_i: u16,
-    element_j: u16
+pub struct Location {
+    pub element_i: u16,
+    pub element_j: u16
 }
 #[derive(Debug)]
-struct Enemy {
-    location: Location,
-    logo: String,
+pub struct Enemy {
+    pub location: Location,
+    pub logo: String,
 }
 #[derive(Debug)]
-struct Bullet {
-    location: Location,
-    active: bool,
-    logo: String,
+pub struct Bullet {
+    pub location: Location,
+    pub active: bool,
+    pub logo: String,
 }
 
 #[derive(Debug)]
-struct Fuel {
-    location: Location,
-    logo: String,
+pub struct Fuel {
+    pub location: Location,
+    pub logo: String,
 }
 
 #[derive(Debug)]
 pub struct Game2DMatrix {
-    player_i: u16,
-    player_j: u16,
-    max_screen_i: u16,
-    max_screen_j: u16,
-    screen_mid: u16,
-    map: Array2<f64>,
-    ground: Vec<(u16, u16)>,
-    enemies: Vec<Enemy>,
-    bullets: Vec<Bullet>,
-    fuels: Vec<Fuel>,
-    game_staus: GameStatus,
-    score: u32,
-    gas: u32,
-    enemy_killed: u32,
-    initialized: bool,
-    logo: String,
+    pub player_i: u16,
+    pub player_j: u16,
+    pub max_screen_i: u16,
+    pub max_screen_j: u16,
+    pub screen_mid: u16,
+    pub map: Array2<f64>,
+    pub ground: Vec<(u16, u16)>,
+    pub enemies: Vec<Enemy>,
+    pub bullets: Vec<Bullet>,
+    pub fuels: Vec<Fuel>,
+    pub game_staus: GameStatus,
+    pub score: u32,
+    pub gas: u32,
+    pub enemy_killed: u32,
+    pub initialized: bool,
+    pub logo: String,
 }
 
-impl GameStructure for Game2DMatrix {
+impl Game2DMatrix {
+    pub fn new() -> Game2DMatrix {
+        // initialize the game information
+        let (max_i, max_j) = size().unwrap();
+
+        Game2DMatrix {
+            player_i: max_i / 2,
+            player_j: max_j - 10,
+            max_screen_i: max_i, 
+            max_screen_j: max_j,
+            screen_mid: max_i / 2,
+            map: Array::from_shape_vec(
+                (max_i as usize, max_j as usize), 
+                vec![0.0; (max_i*max_j) as usize]).unwrap(),
+            ground: vec![(0,0); max_j as usize],
+            enemies: Vec::new(),
+            bullets: Vec::new(),
+            fuels: Vec::new(),
+            game_staus: GameStatus::ALIVE,
+            score: 0,
+            gas: 1500,
+            enemy_killed: 0,
+            initialized: false,
+            logo: '⛵'.to_string(),
+        }
+    }
+
     /// @notice this function will use at the beginning of the game to initialize the ground borders.
     /// @dev this function will use in the draw function is self.initialize was false.
-    fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<&mut Self> {
+    pub fn initialize_ground(&mut self, screen: &mut Stdout) -> Result<()> {
         // initial phase of screen
         screen.queue(Clear(ClearType::All))?;
 
@@ -106,25 +117,33 @@ impl GameStructure for Game2DMatrix {
         }
 
         self.initialized = true;
-        Ok(self)
+        Ok(())
     }
 
 
-    fn draw(&mut self, screen: &mut Stdout,  show_enemy: bool, show_fuel: bool) -> Result<()> {
+    pub fn draw(&mut self, screen: &mut Stdout,  show_enemy: bool, show_fuel: bool) -> Result<()> {
         screen.queue(Clear(ClearType::All))?;
 
         // draw the map as first scence
-        for i in 0..(self.map.row(0).len()) {
-            screen.queue(MoveTo(0, i as u16))? // (i, j)
+        for j in 0..(self.map.row(0).len()) {
+            screen.queue(MoveTo(0, j as u16))? // (i, j)
                 .queue(SetForegroundColor(Color::Green))?
-                .queue(Print("+".repeat(self.ground[i].0 as usize)))?
-                .queue(MoveTo(self.ground[i].1, i as u16))?
-                .queue(Print("+".repeat((self.max_screen_i - self.ground[i].1) as usize)))?
+                .queue(SetBackgroundColor(Color::Green))?
+                .queue(Print(" ".repeat(self.ground[j].0 as usize)))?
+
+                .queue(MoveTo(self.ground[j].0, j as u16))?
+                .queue(SetBackgroundColor(Color::Blue))?
+                .queue(Print(" ".repeat((self.ground[j].1 - self.ground[j].0) as usize)))?
+
+                .queue(MoveTo(self.ground[j].1, j as u16))?
+                .queue(SetBackgroundColor(Color::Green))?
+                .queue(Print(" ".repeat((self.max_screen_i - self.ground[j].1) as usize)))?
                 .queue(ResetColor)?;
         }
 
         for bullet in self.bullets.iter() {
             screen.queue(MoveTo(bullet.location.element_j, bullet.location.element_i))?
+                .queue(SetBackgroundColor(Color::Blue))?
                 .queue(Print(&bullet.logo))?;
         }
 
@@ -141,6 +160,7 @@ impl GameStructure for Game2DMatrix {
 
         for fuel in self.fuels.iter() {
             screen.queue(MoveTo(fuel.location.element_j, fuel.location.element_i))?
+                .queue(SetBackgroundColor(Color::Blue))?
                 .queue(Print(&fuel.logo))?;
         }
 
@@ -157,23 +177,33 @@ impl GameStructure for Game2DMatrix {
 
         for enemy in self.enemies.iter() {
             screen.queue(MoveTo(enemy.location.element_j, enemy.location.element_i))?
-                .queue(SetForegroundColor(Color::Red))?
+                .queue(SetBackgroundColor(Color::Blue))?
                 .queue(Print(&enemy.logo))?
                 .queue(ResetColor)?;
         }
 
         // draw the player
-        screen.queue(MoveTo(self.player_i, self.player_j))?;
-        screen.queue(Print(&self.logo))?;
+        screen.queue(MoveTo(self.player_i, self.player_j))?
+            .queue(SetBackgroundColor(Color::Blue))?
+            .queue(Print(&self.logo))?;
 
         // draw the game scores and status
-        screen.queue(MoveTo(5, 5))?
+        let scores_position = (self.max_screen_i / 13, self.max_screen_j / 13);
+
+        screen.queue(SetBackgroundColor(Color::DarkGrey))?
+            .queue(MoveTo(scores_position.0, scores_position.1))?
             .queue(Print(format!("Score: {}", self.score)))?
-            .queue(MoveTo(5, 6))?
+            .queue(SetBackgroundColor(Color::DarkGrey))?
+
+            .queue(MoveTo(scores_position.0, scores_position.1 + 1))?
             .queue(Print(format!("Enemy killed: {}", self.enemy_killed)))?
-            .queue(MoveTo(5, 7))?
-            .queue(Print(format!("Fuel: {}", self.gas)))?;
-        
+            .queue(SetBackgroundColor(Color::DarkGrey))?
+
+            .queue(MoveTo(scores_position.0, scores_position.1 + 2))?
+            .queue(Print(format!("Fuel: {}", self.gas)))?
+            .queue(SetBackgroundColor(Color::DarkGrey))?
+            .queue(ResetColor)?;
+
         screen.flush()?;
         Ok(())
     }
@@ -181,7 +211,7 @@ impl GameStructure for Game2DMatrix {
 
     /// @notice this function perform the elements' movement during the game loop i.e. bullets, enemies, etc.
     /// @dev this function will be called after the draw function to get the modified nd2array game information.
-    fn shift_ground_loc(&mut self, change: bool) -> Result<&mut Self> {
+    pub fn shift_ground_loc(&mut self, change: bool) -> Result<()> {
         for i in (1..self.map.row(0).len()).rev() {
             self.ground[i] = self.ground[i - 1];
         }
@@ -205,34 +235,27 @@ impl GameStructure for Game2DMatrix {
         let delta = rng.gen_range(1..6);
 
         self.score += 1;
-        if self.score % 20 == 0 { self.gas -= 1; }
+        if self.score % 2 == 0 { self.gas -= 1; }
 
         if change && (self.ground[1].1 < self.max_screen_i - 5) {
             self.ground[0] = (self.ground[1].0 + delta, self.ground[1].1 + delta);
-            Ok(self)
         } else if self.ground[1].0 > delta {
             self.ground[0] = (self.ground[1].0 - delta, self.ground[1].1 - delta);
-            Ok(self)
         } else {
             self.ground[0] = self.ground[1];
-            Ok(self)
         }
+        Ok(())
     }
 
 
-
-
-
-    fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<&mut Self> {
+    pub fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<()> {
         let user_j: usize = self.player_j as usize;
 
         if self.gas == 0 {
             self.game_staus = GameStatus::DEATH;
         }
 
-
         // handling the boat accidentation with ground
-        // let handle_boat_accident = thread::spawn(move|| {
         if self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1
         {
             self.game_staus = GameStatus::DEATH;
@@ -243,13 +266,14 @@ impl GameStructure for Game2DMatrix {
 
         for (idx, enemy) in self.enemies.iter_mut().enumerate() {
             // player collision with the enemies in the ground.
-            if enemy.location.element_j == self.player_i && enemy.location.element_i == self.player_j {
+            if (enemy.location.element_j-1..enemy.location.element_j+1).contains(&self.player_i) && 
+                enemy.location.element_i == self.player_j {
                 self.game_staus = GameStatus::DEATH;
             }
 
             // the reaction related to the player's bullets verses the enemies.
             for bullet in self.bullets.iter_mut() {
-                if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
+                if bullet.active && (enemy.location.element_i-1..enemy.location.element_i+1).contains(&bullet.location.element_i) &&
                     (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
                 {                
                     enemy.logo = ' '.to_string();
@@ -268,8 +292,8 @@ impl GameStructure for Game2DMatrix {
 
         // Take reaction to the fuel chars.
         for fuel in self.fuels.iter() {
-            if (fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
-            (fuel.location.element_i == self.player_j) { self.gas += 10; }
+            if (fuel.location.element_j-2..fuel.location.element_j+2).contains(&self.player_i) &&
+            (fuel.location.element_i == self.player_j) { self.gas += 30; }
         }
         
 
@@ -284,6 +308,6 @@ impl GameStructure for Game2DMatrix {
             )
         );
 
-        Ok(self)
+        Ok(())
     }
 }
