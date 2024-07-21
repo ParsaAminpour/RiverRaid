@@ -1,14 +1,14 @@
 use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
-        Color, Colored, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
+        Color, Print, ResetColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
 use ndarray::{Array2, Array};
 use inline_colorization::*;
 use rand::prelude::*;
 use std::time::Duration;
-// use std::thread;
-// use std::sync::{Mutex, Arc};
+use std::thread;
+use std::sync::{Mutex, Arc};
 
 /*
 ** GAME PHASES
@@ -114,25 +114,17 @@ impl GameStructure for Game2DMatrix {
         screen.queue(Clear(ClearType::All))?;
 
         // draw the map as first scence
-        for j in 0..(self.map.row(0).len()) {
-            screen.queue(MoveTo(0, j as u16))? // (i, j)
+        for i in 0..(self.map.row(0).len()) {
+            screen.queue(MoveTo(0, i as u16))? // (i, j)
                 .queue(SetForegroundColor(Color::Green))?
-                .queue(SetBackgroundColor(Color::Green))?
-                .queue(Print(" ".repeat(self.ground[j].0 as usize)))?
-
-                .queue(MoveTo(self.ground[j].0, j as u16))?
-                .queue(SetBackgroundColor(Color::Blue))?
-                .queue(Print(" ".repeat((self.ground[j].1 - self.ground[j].0) as usize)))?
-
-                .queue(MoveTo(self.ground[j].1, j as u16))?
-                .queue(SetBackgroundColor(Color::Green))?
-                .queue(Print(" ".repeat((self.max_screen_i - self.ground[j].1) as usize)))?
+                .queue(Print("+".repeat(self.ground[i].0 as usize)))?
+                .queue(MoveTo(self.ground[i].1, i as u16))?
+                .queue(Print("+".repeat((self.max_screen_i - self.ground[i].1) as usize)))?
                 .queue(ResetColor)?;
         }
 
         for bullet in self.bullets.iter() {
             screen.queue(MoveTo(bullet.location.element_j, bullet.location.element_i))?
-                .queue(SetBackgroundColor(Color::Blue))?
                 .queue(Print(&bullet.logo))?;
         }
 
@@ -149,7 +141,6 @@ impl GameStructure for Game2DMatrix {
 
         for fuel in self.fuels.iter() {
             screen.queue(MoveTo(fuel.location.element_j, fuel.location.element_i))?
-                .queue(SetBackgroundColor(Color::Blue))?
                 .queue(Print(&fuel.logo))?;
         }
 
@@ -166,33 +157,23 @@ impl GameStructure for Game2DMatrix {
 
         for enemy in self.enemies.iter() {
             screen.queue(MoveTo(enemy.location.element_j, enemy.location.element_i))?
-                .queue(SetBackgroundColor(Color::Blue))?
+                .queue(SetForegroundColor(Color::Red))?
                 .queue(Print(&enemy.logo))?
                 .queue(ResetColor)?;
         }
 
         // draw the player
-        screen.queue(MoveTo(self.player_i, self.player_j))?
-            .queue(SetBackgroundColor(Color::Blue))?
-            .queue(Print(&self.logo))?;
+        screen.queue(MoveTo(self.player_i, self.player_j))?;
+        screen.queue(Print(&self.logo))?;
 
         // draw the game scores and status
-        let scores_position = (self.max_screen_i / 13, self.max_screen_j / 13);
-
-        screen.queue(SetBackgroundColor(Color::DarkGrey))?
-            .queue(MoveTo(scores_position.0, scores_position.1))?
+        screen.queue(MoveTo(5, 5))?
             .queue(Print(format!("Score: {}", self.score)))?
-            .queue(SetBackgroundColor(Color::DarkGrey))?
-
-            .queue(MoveTo(scores_position.0, scores_position.1 + 1))?
+            .queue(MoveTo(5, 6))?
             .queue(Print(format!("Enemy killed: {}", self.enemy_killed)))?
-            .queue(SetBackgroundColor(Color::DarkGrey))?
-
-            .queue(MoveTo(scores_position.0, scores_position.1 + 2))?
-            .queue(Print(format!("Fuel: {}", self.gas)))?
-            .queue(SetBackgroundColor(Color::DarkGrey))?
-            .queue(ResetColor)?;
-
+            .queue(MoveTo(5, 7))?
+            .queue(Print(format!("Fuel: {}", self.gas)))?;
+        
         screen.flush()?;
         Ok(())
     }
@@ -262,14 +243,13 @@ impl GameStructure for Game2DMatrix {
 
         for (idx, enemy) in self.enemies.iter_mut().enumerate() {
             // player collision with the enemies in the ground.
-            if (enemy.location.element_j-1..enemy.location.element_j+1).contains(&self.player_i) && 
-                enemy.location.element_i == self.player_j {
+            if enemy.location.element_j == self.player_i && enemy.location.element_i == self.player_j {
                 self.game_staus = GameStatus::DEATH;
             }
 
             // the reaction related to the player's bullets verses the enemies.
             for bullet in self.bullets.iter_mut() {
-                if bullet.active && (enemy.location.element_i-1..enemy.location.element_i+1).contains(&bullet.location.element_i) &&
+                if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
                     (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
                 {                
                     enemy.logo = ' '.to_string();
@@ -288,7 +268,7 @@ impl GameStructure for Game2DMatrix {
 
         // Take reaction to the fuel chars.
         for fuel in self.fuels.iter() {
-            if (fuel.location.element_j-2..fuel.location.element_j+2).contains(&self.player_i) &&
+            if (fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
             (fuel.location.element_i == self.player_j) { self.gas += 10; }
         }
         
@@ -307,150 +287,3 @@ impl GameStructure for Game2DMatrix {
         Ok(self)
     }
 }
-
-
-fn main() -> Result<()> {
-    let mut screen = stdout();
-    enable_raw_mode().unwrap();
-    screen.execute(Hide).unwrap();
-
-    
-    // initialize the game information
-    let (max_i, max_j) = size().unwrap();
-
-    let mut nd2array = &mut Game2DMatrix {
-        player_i: max_i / 2,
-        player_j: max_j - 10,
-        max_screen_i: max_i, 
-        max_screen_j: max_j,
-        screen_mid: max_i / 2,
-        map: Array::from_shape_vec(
-            (max_i as usize, max_j as usize), 
-            vec![0.0; (max_i*max_j) as usize]).unwrap(),
-        // ground: vec![((max_i / 2) - 10, (max_i / 2) + 10); max_j as usize],
-        ground: vec![(0,0); max_j as usize],
-        enemies: vec![],
-        bullets: vec![],
-        fuels: vec![],
-        game_staus: GameStatus::ALIVE,
-        score: 0,
-        gas: 120,
-        enemy_killed: 0,
-        initialized: false,
-        logo: '⛵'.to_string(),
-    };
-
-    nd2array = nd2array.initialize_ground(&mut screen)?;
-    
-    while nd2array.game_staus == GameStatus::ALIVE {
-        // implementing the keyboard binding.
-        if poll(Duration::from_millis(10))? {
-
-            let key = read().unwrap();
-            while poll(Duration::from_millis(0)).unwrap() {
-                let _ = read();
-            }
-            match key {
-                Event::Key(event) => {
-                    match event.code {
-                        KeyCode::Char('q') => { break; },
-
-                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { nd2array.player_i += 2; },
-
-                        KeyCode::Left => if nd2array.player_i - 1 > 0 { nd2array.player_i -= 2; },
-
-                        KeyCode::Up => if nd2array.player_j - 1 > 0 { nd2array.player_j -= 1; },
-
-                        KeyCode::Down => if nd2array.player_j + 1 < nd2array.max_screen_j { nd2array.player_j += 1; },
-
-                        KeyCode::Char(' ') => {
-                            nd2array.bullets.push(Bullet {
-                                location: Location {
-                                    element_i: nd2array.player_j,
-                                    element_j: nd2array.player_i,
-                                },
-                                active: true,
-                                logo: '🔥'.to_string()
-                            });
-                        }
-                        _ => {}
-                    }
-                },
-                _ => {}
-            }
-        }
-        sleep(Duration::from_millis(100));
-        nd2array = nd2array.reactions().unwrap();
-
-        nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
-
-        nd2array = nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
-
-        if nd2array.game_staus == GameStatus::DEATH { break; }
-    }
-
-    screen.flush().unwrap();
-    screen.execute(Show)?;
-    screen.queue(MoveTo(nd2array.max_screen_i / 2, 0))?
-        .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
-
-    Ok(())
-}
-
-
-
-    // // let's using multi-thread in advance.
-    // fn reactions2(&'static mut self, /*screen: &mut Stdout*/) -> Result<&'static mut Self> {
-    //     let user_j: usize = self.player_j as usize;
-
-    //     // Player gas check and ground collision.
-    //     if (self.gas == 0) || 
-    //         (self.player_i <= self.ground[user_j].0 || self.player_i >= self.ground[user_j].1) 
-    //     {
-    //         self.game_staus = GameStatus::DEATH;
-    //     }
-        
-    //     let game_state: Arc<Mutex<&'static mut Game2DMatrix>> = Arc::new(Mutex::new(self));
-    //     let game_state_cloned: Arc<Mutex<&mut Game2DMatrix>> = Arc::clone(&game_state);
-
-    //     // player collision to the ground checks.
-    //     let handling_enemy_and_player_collision = thread::spawn(move|| {
-    //         let mut locked_game_state = game_state_cloned.lock().unwrap();
-
-    //         let mut death: bool = false;
-    //         for enemy in locked_game_state.enemies.iter() {
-    //             // let locked_game_state_instance = locked_game_state;
-    //             if enemy.location.element_j == locked_game_state.player_i && enemy.location.element_i == locked_game_state.player_j {
-    //                 death = true;
-    //             }
-    //         }
-    //         if death { locked_game_state.game_staus = GameStatus::DEATH; };
-    //     });
-
-
-    //     // the reactions related to the enemies.
-    //     let handling_enemy_and_bullet_collisions = thread::spawn(move || {
-    //         let mut locked_game_state = game_state.lock().unwrap();
-            
-    //         for bullet in self.bullets.iter_mut() {
-    //             if bullet.active && (enemy.location.element_i-3..enemy.location.element_i+3).contains(&bullet.location.element_i) &&
-    //                 (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
-    //             {                
-    //                 enemy.logo = ' '.to_string();
-    //                 enemies_to_remove.push(idx);
-    //                 sleep(Duration::from_millis(100));
-    //                 bullet.active = false;
-    //                 bullet.logo = ' '.to_string();
-    //             }
-    //         }
-    //     });
-        
-    //     // the reaction related to the fuels.
-
-    //     // remove the unused ground chracters at the botton of the ground.
-        
-    //     // handle the unfullfiled threads.
-        
-    //     handling_enemy_and_player_collision.join().unwrap();
-    //     Ok(self)
-    // }
