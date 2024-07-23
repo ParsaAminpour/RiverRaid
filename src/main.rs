@@ -1,4 +1,4 @@
-use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
+use std::{borrow::BorrowMut, io::{stdout, Result, Stdout, Write}, rc::Rc, thread::{self, sleep}, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
         Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
@@ -7,8 +7,9 @@ use ndarray::{Array2, Array};
 use inline_colorization::*;
 use rand::prelude::*;
 use std::time::Duration;
-
 use river_raid::*;
+use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 
 fn main() -> Result<()> {
     let mut screen = stdout();
@@ -19,6 +20,7 @@ fn main() -> Result<()> {
 
     nd2array.initialize_ground(&mut screen).unwrap();
     
+
     while nd2array.game_staus == GameStatus::ALIVE {
         // implementing the keyboard binding.
         if poll(Duration::from_millis(10))? {
@@ -27,12 +29,17 @@ fn main() -> Result<()> {
             while poll(Duration::from_millis(0)).unwrap() {
                 let _ = read();
             }
+
+            // Bug related to the Refrence counted while single thread and multi-thread processes are combined with eachother.
+            let rc_nd2array = Rc::new(RefCell::new(nd2array));
+
             match key {
                 Event::Key(event) => {
+
                     match event.code {
                         KeyCode::Char('q') => { break; },
 
-                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { nd2array.player_i += 2; },
+                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { cloned_nd2array.player_i += 2; },
 
                         KeyCode::Left => if nd2array.player_i - 1 > 0 { nd2array.player_i -= 2; },
 
@@ -41,14 +48,29 @@ fn main() -> Result<()> {
                         KeyCode::Down => if nd2array.player_j + 1 < nd2array.max_screen_j { nd2array.player_j += 1; },
 
                         KeyCode::Char(' ') => {
-                            nd2array.bullets.push(Bullet {
-                                location: Location {
-                                    element_i: nd2array.player_j,
-                                    element_j: nd2array.player_i,
-                                },
-                                active: true,
-                                logo: '🔥'.to_string()
+                            let atomic_nd2array = Arc::new(Mutex::new(nd2array));
+                            let cloned_atomic_nd2array = Arc::clone(&atomic_nd2array);
+
+                            let handle_bullet_drowing = std::thread::spawn(move || {
+                                let mut locked_atomic_nd2array = cloned_atomic_nd2array.lock().unwrap();
+
+                                locked_atomic_nd2array.bullets.push(Bullet {
+                                    location: Location {
+                                        element_i: Arc::clone(&atomic_nd2array).lock().unwrap().player_j,
+                                        element_j: Arc::clone(&atomic_nd2array).lock().unwrap().player_i,
+                                    },
+                                    active: true,
+                                    logo: '🔥'.to_string()
+                                });
+
                             });
+                            
+                            let handle_sound = thread::spawn(move || {
+                                handle_sound2("src/assets/laser_ray_zap_singleshot.wav".to_string());
+                            });
+
+                            handle_bullet_drowing.join().unwrap();
+                            handle_sound.join().unwrap();
                         }
                         _ => {}
                     }
@@ -56,19 +78,22 @@ fn main() -> Result<()> {
                 _ => {}
             }
         }
-        sleep(Duration::from_millis(100));
+        // let rc_nd2array = Rc::new(&nd2array);
+
+        sleep(Duration::from_millis(66));
         nd2array.reactions().unwrap();
-
+        
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
-
+        
         nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
-
-        if nd2array.game_staus == GameStatus::DEATH { break; }
+        
+        // if nd2array.game_staus == GameStatus::DEATH { break; }
     }
 
+    let rc_nd2array2 = Rc::new(nd2array);
     screen.flush().unwrap();
     screen.execute(Show)?;
-    screen.queue(MoveTo(nd2array.max_screen_i / 2, 0))?
+    screen.queue(MoveTo(Rc::clone(&rc_nd2array2).max_screen_i / 2, 0))?
         .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
 
     Ok(())

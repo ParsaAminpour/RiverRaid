@@ -3,12 +3,19 @@ use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
         Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
 };
+
+use std::fs::File;
+use std::io::BufReader;
+use rodio::{Decoder, OutputStream, source::Source};
+
 use ndarray::{Array2, Array};
 use inline_colorization::*;
 use rand::prelude::*;
 use std::time::Duration;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 // use std::thread;
-// use std::sync::{Mutex, Arc};
 
 /*
 ** GAME PHASES
@@ -42,6 +49,30 @@ pub struct Bullet {
 pub struct Fuel {
     pub location: Location,
     pub logo: String,
+}
+
+pub enum Sound {
+    EnemyKilled(String),
+    FuelObtained(String),
+    BoatCrashed(String)
+}
+
+pub fn handle_sound(sound_file: String) {
+    let (_stream, stream_handler) = OutputStream::try_default().unwrap();
+    let file = BufReader::new(File::open(sound_file).unwrap());
+    let source = Decoder::new(file).unwrap();
+    
+    stream_handler.play_raw(source.convert_samples()).unwrap();
+}
+
+pub fn handle_sound2(sound_file: String) {
+    let (_stream, handle) = rodio::OutputStream::try_default().unwrap();
+    let sink = rodio::Sink::try_new(&handle).unwrap();
+
+    let file = std::fs::File::open(sound_file.to_string()).unwrap();
+    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+
+    sink.sleep_until_end();
 }
 
 #[derive(Debug)]
@@ -121,7 +152,7 @@ impl Game2DMatrix {
     }
 
 
-    pub fn draw(&mut self, screen: &mut Stdout,  show_enemy: bool, show_fuel: bool) -> Result<()> {
+    pub fn draw(self:&mut Self, screen: &mut Stdout,  show_enemy: bool, show_fuel: bool) -> Result<()> {
         screen.queue(Clear(ClearType::All))?;
 
         // draw the map as first scence
@@ -262,7 +293,7 @@ impl Game2DMatrix {
         }
 
         // enemies
-        let mut enemies_to_remove:Vec<usize> = vec![];
+        let mut enemies_to_remove: Vec<usize> = vec![];
 
         for (idx, enemy) in self.enemies.iter_mut().enumerate() {
             // player collision with the enemies in the ground.

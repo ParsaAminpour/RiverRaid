@@ -6,10 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+alsa-sys = "0.3.1"
 chrono = "0.4.38"
 crossterm = "0.27.0"
 inline_colorization = "0.1.6"
 ndarray = "0.15.6"
 rand = "0.8.5"
+rodio = "0.19.0"
 sed = "0.1.0"
 sled = "0.34.7"
