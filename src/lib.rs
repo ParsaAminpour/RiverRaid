@@ -1,4 +1,4 @@
-use std::{io::{stdout, Result, Stdout, Write}, thread::sleep, vec};
+use std::{borrow::{Borrow, BorrowMut}, clone, io::{stdout, Result, Stdout, Write}, thread::{self, sleep}, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
         Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
@@ -6,7 +6,7 @@ use crossterm::{
 
 use std::fs::File;
 use std::io::BufReader;
-use rodio::{Decoder, OutputStream, source::Source};
+use rodio::{buffer, source::Source, Decoder, OutputStream};
 
 use ndarray::{Array2, Array};
 use inline_colorization::*;
@@ -57,23 +57,6 @@ pub enum Sound {
     BoatCrashed(String)
 }
 
-pub fn handle_sound(sound_file: String) {
-    let (_stream, stream_handler) = OutputStream::try_default().unwrap();
-    let file = BufReader::new(File::open(sound_file).unwrap());
-    let source = Decoder::new(file).unwrap();
-    
-    stream_handler.play_raw(source.convert_samples()).unwrap();
-}
-
-pub fn handle_sound2(sound_file: String) {
-    let (_stream, handle) = rodio::OutputStream::try_default().unwrap();
-    let sink = rodio::Sink::try_new(&handle).unwrap();
-
-    let file = std::fs::File::open(sound_file.to_string()).unwrap();
-    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-
-    sink.sleep_until_end();
-}
 
 #[derive(Debug)]
 pub struct Game2DMatrix {
@@ -278,7 +261,7 @@ impl Game2DMatrix {
         Ok(())
     }
 
-
+    
     pub fn reactions(&mut self, /*screen: &mut Stdout*/) -> Result<()> {
         let user_j: usize = self.player_j as usize;
 
@@ -292,7 +275,7 @@ impl Game2DMatrix {
             self.game_staus = GameStatus::DEATH;
         }
 
-        // enemies
+        /////////////////////////////// Take reaction to the enemies chars. ///////////////////////////////
         let mut enemies_to_remove: Vec<usize> = vec![];
 
         for (idx, enemy) in self.enemies.iter_mut().enumerate() {
@@ -315,19 +298,22 @@ impl Game2DMatrix {
                 }
             }
         }
+
         enemies_to_remove.sort_unstable_by(|a, b| b.cmp(a)); // Sort in reverse order
         for idx in enemies_to_remove {
             self.enemies.remove(idx);
             self.enemy_killed += 1;
         }
 
-        // Take reaction to the fuel chars.
+
+        /////////////////////////////// Take reaction to the fuel chars. ///////////////////////////////
         for fuel in self.fuels.iter() {
             if (fuel.location.element_j-2..fuel.location.element_j+2).contains(&self.player_i) &&
             (fuel.location.element_i == self.player_j) { self.gas += 30; }
         }
         
 
+        /////////////////////////////// Take reaction to bottom of the screen ///////////////////////////////
         self.enemies.retain(|enemy| {
             enemy.location.element_i < self.max_screen_j - 3
         });
@@ -338,7 +324,120 @@ impl Game2DMatrix {
                 (fuel.location.element_i > self.max_screen_j - 3)
             )
         );
+        Ok(())
+    }
+
+
+
+    pub fn reactions2(self: &'static mut Self) -> Result<()> {
+        let user_j: usize = self.player_j as usize;
+
+        let arc_game = Arc::new(Mutex::new(self));
+        let cloned_game = Arc::clone(&arc_game);
+
+        let handle_accidents = thread::spawn(move || {
+            let mut game = cloned_game.lock().unwrap();
+            
+            if game.gas == 0 {
+                game.game_staus = GameStatus::DEATH;
+            }
+    
+            // handling the boat accidentation with ground
+            if game.player_i <= game.ground[user_j].0 || game.player_i >= game.ground[user_j].1
+            {
+                game.game_staus = GameStatus::DEATH;
+            }
+        });
+
+        
+        /////////////////////////////// Take reaction to the enemies with the player ///////////////////////////////
+        let cloned_game2 = Arc::clone(&arc_game);
+        
+        let handle_enemy_accident_with_player = std::thread::spawn(move || {
+            let mut game = cloned_game2.lock().unwrap();
+            let (player_i, player_j) = (game.player_i, game.player_j);
+            
+            let game_status: bool = game.enemies.iter().any(|enemy| {
+                (enemy.location.element_j-1..enemy.location.element_j+1).contains(&player_i) &&
+                enemy.location.element_i == player_j
+            });
+            
+            if game_status { game.game_staus = GameStatus::DEATH; }
+        });
+        
+        
+        /////////////////////////////// Take reaction to the fuel chars. ///////////////////////////////
+        let cloned_game3 = Arc::clone(&arc_game);
+
+        let handle_fuel_reaction = std::thread::spawn(move || {
+            let mut game = cloned_game3.lock().unwrap();
+            let (player_i, player_j) = (game.player_i, game.player_j);
+
+            let res: bool = game.fuels.iter().any(|fuel| {
+                (fuel.location.element_j-2..fuel.location.element_j+2).contains(&player_i) &&
+                (fuel.location.element_i == player_j)
+            });
+
+            if res { game.gas += 40; }
+        });
+
+
+        /////////////////////////////// Take reaction to the enemies with the player ///////////////////////////////
+        let mut enemies_to_remove :Vec<usize> = Vec::new();
+        let mut game_in_main_thread = arc_game.lock().unwrap();
+
+        for (idx, enemy) in &mut game_in_main_thread.enemies.iter_mut().enumerate() {
+            for bullet in Arc::clone(&arc_game).lock().unwrap().bullets.iter_mut() {
+                if bullet.active && (enemy.location.element_i-1..enemy.location.element_i+1).contains(&bullet.location.element_i) &&
+                    (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
+                {                
+                    enemy.logo = ' '.to_string();
+                    enemies_to_remove.push(idx);
+                    sleep(Duration::from_millis(100));
+                    bullet.active = false;
+                    bullet.logo = ' '.to_string();
+                }
+            }
+        }
+
+        enemies_to_remove.sort_unstable_by(|a, b| b.cmp(a)); // Sort in reverse order
+        for idx in enemies_to_remove {
+            game_in_main_thread.enemies.remove(idx);
+            game_in_main_thread.enemy_killed += 1;
+        }
+
+
+        /////////////////////////////// Take reaction to bottom of the screen ///////////////////////////////
+        // self.enemies.retain(|enemy| {
+        //     enemy.location.element_i < self.max_screen_j - 3
+        // });
+
+        // self.fuels.retain(|fuel|
+        //     !((fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
+        //         (fuel.location.element_i == self.player_j) ||
+        //         (fuel.location.element_i > self.max_screen_j - 3)
+        //     )
+        // );
+
+
+        handle_accidents.join().unwrap();
+        handle_enemy_accident_with_player.join().unwrap();
+        handle_fuel_reaction.join().unwrap();
 
         Ok(())
     }
 }
+
+
+
+pub fn handle_sound(sound_file: String){
+    let (_stream, handle) = rodio::OutputStream::try_default().unwrap();
+    let sink = rodio::Sink::try_new(&handle).unwrap();
+
+    let file = std::fs::File::open(sound_file.to_string()).unwrap();
+    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+
+    sink.sleep_until_end();
+}
+
+

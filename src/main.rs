@@ -10,6 +10,7 @@ use std::time::Duration;
 use river_raid::*;
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
+use tokio::task;
 
 fn main() -> Result<()> {
     let mut screen = stdout();
@@ -23,23 +24,22 @@ fn main() -> Result<()> {
 
     while nd2array.game_staus == GameStatus::ALIVE {
         // implementing the keyboard binding.
-        if poll(Duration::from_millis(10))? {
+        if poll(Duration::from_millis(5))? {
 
             let key = read().unwrap();
             while poll(Duration::from_millis(0)).unwrap() {
                 let _ = read();
             }
 
-            // Bug related to the Refrence counted while single thread and multi-thread processes are combined with eachother.
-            let rc_nd2array = Rc::new(RefCell::new(nd2array));
-
+            // Bug the 'static input in the reactions function borrowed the nd2array, therefore we could NOT use that.
+            // let rc_nd2array = Rc::new(RefCell::new(nd2array));
             match key {
                 Event::Key(event) => {
 
                     match event.code {
                         KeyCode::Char('q') => { break; },
 
-                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { cloned_nd2array.player_i += 2; },
+                        KeyCode::Right => if nd2array.player_i + 1 < nd2array.max_screen_i { nd2array.player_i += 2; },
 
                         KeyCode::Left => if nd2array.player_i - 1 > 0 { nd2array.player_i -= 2; },
 
@@ -48,29 +48,18 @@ fn main() -> Result<()> {
                         KeyCode::Down => if nd2array.player_j + 1 < nd2array.max_screen_j { nd2array.player_j += 1; },
 
                         KeyCode::Char(' ') => {
-                            let atomic_nd2array = Arc::new(Mutex::new(nd2array));
-                            let cloned_atomic_nd2array = Arc::clone(&atomic_nd2array);
-
-                            let handle_bullet_drowing = std::thread::spawn(move || {
-                                let mut locked_atomic_nd2array = cloned_atomic_nd2array.lock().unwrap();
-
-                                locked_atomic_nd2array.bullets.push(Bullet {
-                                    location: Location {
-                                        element_i: Arc::clone(&atomic_nd2array).lock().unwrap().player_j,
-                                        element_j: Arc::clone(&atomic_nd2array).lock().unwrap().player_i,
-                                    },
-                                    active: true,
-                                    logo: '🔥'.to_string()
-                                });
-
-                            });
-                            
-                            let handle_sound = thread::spawn(move || {
-                                handle_sound2("src/assets/laser_ray_zap_singleshot.wav".to_string());
+                            thread::spawn(move || {
+                                handle_sound("src/assets/laser_ray_zap_singleshot.wav".to_string());
                             });
 
-                            handle_bullet_drowing.join().unwrap();
-                            handle_sound.join().unwrap();
+                            nd2array.bullets.push(Bullet {
+                                location: Location {
+                                    element_i: nd2array.player_j,
+                                    element_j: nd2array.player_i,
+                                },
+                                active: true,
+                                logo: '🔥'.to_string()
+                            });
                         }
                         _ => {}
                     }
@@ -80,7 +69,7 @@ fn main() -> Result<()> {
         }
         // let rc_nd2array = Rc::new(&nd2array);
 
-        sleep(Duration::from_millis(66));
+        sleep(Duration::from_millis(60));
         nd2array.reactions().unwrap();
         
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
