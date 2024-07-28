@@ -1,4 +1,4 @@
-use std::{borrow::{Borrow, BorrowMut}, clone, io::{stdout, Result, Stdout, Write}, thread::{self, sleep}, vec};
+use std::{borrow::{Borrow, BorrowMut}, clone, io::{stdout, Result, Stdout, Write}, ops::{Deref, DerefMut}, thread::{self, sleep}, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
         Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
@@ -333,8 +333,10 @@ impl Game2DMatrix {
 
 
 
-    pub fn multi_reactions(self: &'static mut Self) -> Result<()> {
+    pub fn multi_reactions(self: &'static mut Self) -> Result<()>{
         let user_j: usize = self.player_j as usize;
+        
+        // let self2 = Box::new(self);
 
         let arc_game = Arc::new(Mutex::new(self));
         let cloned_game = Arc::clone(&arc_game);
@@ -437,6 +439,26 @@ impl Game2DMatrix {
         handle_bottom_of_the_game.join().unwrap();
 
         Ok(())
+        // let org_self = std::mem::replace(&mut *arc_game, src)
+    //     let val = *arc_game.lock().unwrap();
+    //     Game2DMatrix {
+    //         player_i: val.player_i,
+    //         player_j: val.player_j,
+    //         max_screen_i: val.max_screen_i,
+    //         max_screen_j: val.max_screen_j,
+    //         screen_mid: val.screen_mid,
+    //         map: val.map,
+    //         ground: val.ground,
+    //         enemies: val.enemies,
+    //         bullets: val.bullets,
+    //         fuels: val.fuels,
+    //         game_staus: val.game_staus,
+    //         score: val.score,
+    //         gas: val.gas,
+    //         enemy_killed: val.enemy_killed,
+    //         initialized: val.initialized,
+    //         logo: val.logo,
+    //     }
     }
 }
 

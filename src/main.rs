@@ -17,11 +17,13 @@ fn main() -> Result<()> {
     screen.execute(Hide).unwrap();
     screen.execute(crossterm::terminal::SetTitle("River Raid Game")).unwrap();
 
-    let mut nd2array= Game2DMatrix::new();
+    let mut nd2array = Game2DMatrix::new();
+    // let mut nd2array = Rc::new(RefCell::new(Game2DMatrix::new()));
     // let static_ref = Box::leak(nd2array) as &'static mut Game2DMatrix;
     
+    // let mut into_nd2array = Rc::clone(&nd2array);
     nd2array.initialize_ground(&mut screen).unwrap();
-    
+
     while nd2array.game_staus == GameStatus::ALIVE {
         // implementing the keyboard binding.
         if poll(Duration::from_millis(5))? {
@@ -31,8 +33,6 @@ fn main() -> Result<()> {
                 let _ = read();
             }
 
-            // Bug the 'static input in the reactions function borrowed the nd2array, therefore we could NOT use that.
-            // let rc_nd2array = Rc::new(RefCell::new(nd2array));
             match key {
                 Event::Key(event) => {
 
@@ -70,12 +70,13 @@ fn main() -> Result<()> {
         // let rc_nd2array = Rc::new(&nd2array);
 
         sleep(Duration::from_millis(60));
-        nd2array.reactions().unwrap();
-        // nd2array.multi_reactions().unwrap();
+        // let cloned_version = Rc::clone(&nd2array);
+        // nd2array.reactions().unwrap();
+        std::thread::spawn(move || nd2array.reactions().unwrap());
         
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
         
-        nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();        
+        nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();       
     }
 
     let rc_nd2array2 = Rc::new(nd2array);
@@ -84,8 +85,8 @@ fn main() -> Result<()> {
 
     screen.flush().unwrap();
     screen.execute(Show)?;
-    screen.queue(MoveTo(Rc::clone(&rc_nd2array2).max_screen_i / 2, 0))?
-        .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
+    // screen.queue(MoveTo(Rc::clone(&rc_nd2array2).max_screen_i / 2, 0))?
+        // .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
 
     Ok(())
 }
