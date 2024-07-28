@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, io::{stdout, Result, Stdout, Write}, rc::Rc, thread::{self, sleep}, vec};
+use std::{borrow::BorrowMut, cell::Ref, io::{stdout, Result, Stdout, Write}, rc::Rc, thread::{self, sleep}, vec};
 use crossterm::{
     cursor::{Hide, MoveTo, Show}, event::{poll, read, Event, KeyCode}, style::{
         Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{enable_raw_mode, size, Clear, ClearType}, ExecutableCommand, QueueableCommand
@@ -18,10 +18,10 @@ fn main() -> Result<()> {
     screen.execute(crossterm::terminal::SetTitle("River Raid Game")).unwrap();
 
     let mut nd2array= Game2DMatrix::new();
+    // let static_ref = Box::leak(nd2array) as &'static mut Game2DMatrix;
     
     nd2array.initialize_ground(&mut screen).unwrap();
     
-
     while nd2array.game_staus == GameStatus::ALIVE {
         // implementing the keyboard binding.
         if poll(Duration::from_millis(5))? {
@@ -71,6 +71,7 @@ fn main() -> Result<()> {
 
         sleep(Duration::from_millis(60));
         nd2array.reactions().unwrap();
+        // nd2array.multi_reactions().unwrap();
         
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
         
