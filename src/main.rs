@@ -10,15 +10,15 @@ use std::time::Duration;
 use river_raid::*;
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
-use tokio::task;
 
 fn main() -> Result<()> {
     let mut screen = stdout();
     enable_raw_mode().unwrap();
     screen.execute(Hide).unwrap();
+    screen.execute(crossterm::terminal::SetTitle("River Raid Game")).unwrap();
 
-    let mut nd2array = Game2DMatrix::new();
-
+    let mut nd2array= Game2DMatrix::new();
+    
     nd2array.initialize_ground(&mut screen).unwrap();
     
 
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
 
                         KeyCode::Char(' ') => {
                             thread::spawn(move || {
-                                handle_sound("src/assets/laser_ray_zap_singleshot.wav".to_string());
+                                handle_sound("src/assets/laser_ray_zap_singleshot.wav".to_string(), 1.5);
                             });
 
                             nd2array.bullets.push(Bullet {
@@ -74,12 +74,13 @@ fn main() -> Result<()> {
         
         nd2array.draw(&mut screen, rand::thread_rng().gen_bool(0.1), rand::thread_rng().gen_bool(0.01)).unwrap();
         
-        nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
-        
-        // if nd2array.game_staus == GameStatus::DEATH { break; }
+        nd2array.shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();        
     }
 
     let rc_nd2array2 = Rc::new(nd2array);
+
+    handle_sound("src/assets/game_over.wav".to_string(), 1.0);
+
     screen.flush().unwrap();
     screen.execute(Show)?;
     screen.queue(MoveTo(Rc::clone(&rc_nd2array2).max_screen_i / 2, 0))?

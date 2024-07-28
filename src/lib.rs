@@ -287,9 +287,13 @@ impl Game2DMatrix {
 
             // the reaction related to the player's bullets verses the enemies.
             for bullet in self.bullets.iter_mut() {
-                if bullet.active && (enemy.location.element_i-1..enemy.location.element_i+1).contains(&bullet.location.element_i) &&
+                if bullet.active && (enemy.location.element_i-2..enemy.location.element_i+2).contains(&bullet.location.element_i) &&
                     (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
                 {                
+                    std::thread::spawn(move || {
+                        handle_sound("src/assets/demon-death.wav".to_string(), 1.5);
+                    });
+
                     enemy.logo = ' '.to_string();
                     enemies_to_remove.push(idx);
                     sleep(Duration::from_millis(100));
@@ -301,7 +305,7 @@ impl Game2DMatrix {
 
         enemies_to_remove.sort_unstable_by(|a, b| b.cmp(a)); // Sort in reverse order
         for idx in enemies_to_remove {
-            self.enemies.remove(idx);
+            if idx <  self.enemies.len() { self.enemies.remove(idx); }
             self.enemy_killed += 1;
         }
 
@@ -329,7 +333,7 @@ impl Game2DMatrix {
 
 
 
-    pub fn reactions2(self: &'static mut Self) -> Result<()> {
+    pub fn multi_reactions(self: &'static mut Self) -> Result<()> {
         let user_j: usize = self.player_j as usize;
 
         let arc_game = Arc::new(Mutex::new(self));
@@ -388,7 +392,7 @@ impl Game2DMatrix {
 
         for (idx, enemy) in &mut game_in_main_thread.enemies.iter_mut().enumerate() {
             for bullet in Arc::clone(&arc_game).lock().unwrap().bullets.iter_mut() {
-                if bullet.active && (enemy.location.element_i-1..enemy.location.element_i+1).contains(&bullet.location.element_i) &&
+                if bullet.active && (enemy.location.element_i-2..enemy.location.element_i+2).contains(&bullet.location.element_i) &&
                     (enemy.location.element_j-2..enemy.location.element_j+2).contains(&bullet.location.element_j) 
                 {                
                     enemy.logo = ' '.to_string();
@@ -408,21 +412,29 @@ impl Game2DMatrix {
 
 
         /////////////////////////////// Take reaction to bottom of the screen ///////////////////////////////
-        // self.enemies.retain(|enemy| {
-        //     enemy.location.element_i < self.max_screen_j - 3
-        // });
+        let cloned_game4 = Arc::clone(&arc_game);
 
-        // self.fuels.retain(|fuel|
-        //     !((fuel.location.element_j-1..fuel.location.element_j+1).contains(&self.player_i) &&
-        //         (fuel.location.element_i == self.player_j) ||
-        //         (fuel.location.element_i > self.max_screen_j - 3)
-        //     )
-        // );
+        let handle_bottom_of_the_game = std::thread::spawn(move || {
+            let mut game = cloned_game4.lock().unwrap();
+            let (player_i, player_j) = (game.player_i, game.player_j);
 
+            let max_screen_j = game.max_screen_j;
+            game.enemies.retain(|enemy| {
+                enemy.location.element_i < max_screen_j - 3
+            });
+            
+            game.fuels.retain(|fuel|
+                !((fuel.location.element_j-1..fuel.location.element_j+1).contains(&player_i) &&
+                    (fuel.location.element_i == player_j) ||
+                    (fuel.location.element_i > max_screen_j - 3)
+                )
+            );
+        });
 
         handle_accidents.join().unwrap();
         handle_enemy_accident_with_player.join().unwrap();
         handle_fuel_reaction.join().unwrap();
+        handle_bottom_of_the_game.join().unwrap();
 
         Ok(())
     }
@@ -430,14 +442,13 @@ impl Game2DMatrix {
 
 
 
-pub fn handle_sound(sound_file: String){
+pub fn handle_sound(sound_file: String, time_speed: f32){
     let (_stream, handle) = rodio::OutputStream::try_default().unwrap();
     let sink = rodio::Sink::try_new(&handle).unwrap();
 
     let file = std::fs::File::open(sound_file.to_string()).unwrap();
     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
+    sink.set_speed(time_speed);
     sink.sleep_until_end();
 }
-
-
