@@ -411,6 +411,7 @@ impl Game2DMatrix {
         let mut enemies_to_remove: Vec<usize> = Vec::new();
         let mut game_in_main_thread = arc_game.lock().unwrap();
 
+        // todo: add rayon parallelization for this nested loops.
         for (idx, enemy) in &mut game_in_main_thread.enemies.iter_mut().enumerate() {
             for bullet in Arc::clone(&arc_game).lock().unwrap().bullets.iter_mut() {
                 if bullet.active

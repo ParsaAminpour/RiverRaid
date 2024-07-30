@@ -20,12 +20,12 @@ use std::{
     thread::{self, sleep},
     vec,
 };
-use sled;
+// use shuttle_actix_web::ShuttleActixWeb;
 
 
-fn main() -> Result<()> {
-    let db: sled::Db = sled::open("my_db").unwrap();
+mod server;
 
+fn main2() -> Result<()> {
     let mut screen = stdout();
     enable_raw_mode().unwrap();
     screen.execute(Hide).unwrap();
@@ -101,12 +101,10 @@ fn main() -> Result<()> {
             &mut screen,
             rand::thread_rng().gen_bool(0.1),
             rand::thread_rng().gen_bool(0.01),
-        )
-        .unwrap();
+        ).unwrap();
     
         nd2array
-        .shift_ground_loc(rand::thread_rng().gen_bool(0.5))
-        .unwrap();
+        .shift_ground_loc(rand::thread_rng().gen_bool(0.5)).unwrap();
 
         nd2array.reactions().unwrap();
     }
@@ -116,6 +114,15 @@ fn main() -> Result<()> {
     screen.flush().unwrap();
     screen.execute(Show)?;
     screen.queue(MoveTo(Rc::clone(&rc_nd2array2).max_screen_i / 2, 0))?
-        .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?;
+        .queue(Print(format!("{color_green}Thanks for playing{color_reset}\n")))?
+        .queue(Clear(ClearType::All))?;
     Ok(())
+}
+
+
+
+#[actix_web::main]
+async fn main() -> Result<()>{
+    println!("Running web server...");
+    server::run_server().await
 }
