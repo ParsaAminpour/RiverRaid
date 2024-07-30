@@ -121,6 +121,7 @@ fn main2() -> Result<()> {
 
 
 
+// todo this function should applied at a separate cargo
 #[actix_web::main]
 async fn main() -> Result<()>{
     println!("Running web server...");
